@@ -20,6 +20,10 @@ dev = [
     "pytest",
     "ruff",
 ]
+# Behavior experiment: free-form generation via vLLM (GPU host only).
+behavior = [
+    "vllm",
+]
 
 [project.scripts]
 latent-align = "latent_alignment.cli:main"

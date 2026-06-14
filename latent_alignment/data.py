@@ -89,6 +89,40 @@ def load_dataset(
     raise ValueError(f"Unsupported dataset format: {dataset_format}")
 
 
+def load_statements(
+    path: str | Path,
+    *,
+    text_col: str = "statement",
+    label_col: str = "is_harmfull_opposition",
+) -> pd.DataFrame:
+    """Load raw statements (without Yes/No suffixes) for free-form generation.
+
+    Returns a DataFrame with columns ``statement``, ``label`` and ``pair_id``. Like the
+    ``polarity_raw`` format, the file is treated as two stacked halves: the first half and
+    the second half share ``pair_id`` values so opposite-polarity statements can be matched.
+    Unlike :func:`load_dataset`, no suffix is appended and an even row count is not required.
+    """
+    path = Path(path)
+    df = _read_table(path)
+    _require_columns(df, [text_col])
+
+    n = len(df)
+    midpoint = n // 2
+    if label_col in df:
+        labels = df[label_col].astype(int).reset_index(drop=True)
+    else:
+        labels = pd.Series([0] * n, name=label_col)
+    pair_ids = list(range(midpoint)) + list(range(n - midpoint))
+
+    return pd.DataFrame(
+        {
+            "statement": df[text_col].astype(str).reset_index(drop=True),
+            "label": labels,
+            "pair_id": pd.Series(pair_ids),
+        }
+    )
+
+
 def _read_table(path: Path) -> pd.DataFrame:
     if path.suffix == ".csv":
         return pd.read_csv(path)

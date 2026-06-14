@@ -1,4 +1,5 @@
-# PA-CCS on the mixed dataset with OLMo, using median normalization (as in the notebook).
+# PA-CCS on the mixed dataset with OLMo, using l2+median normalization
+# (the best-performing pipeline in the gemma notebook: L2 over features, then median).
 latent-align run \
   --dataset data/polarity_probing/raw/mixed_dataset.csv \
   --dataset-format polarity_raw \
@@ -6,4 +7,4 @@ latent-align run \
   --model-kind decoder \
   --strategy last-token \
   --output-dir runs/olmo_1b_mixed \
-  --normalizing median
+  --normalizing l2,median

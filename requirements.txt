@@ -6,3 +6,5 @@ sentencepiece
 torch
 tqdm
 transformers
+# Behavior experiment generation (GPU host only); also available via the `behavior` extra.
+vllm

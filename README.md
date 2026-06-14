@@ -1,21 +1,24 @@
 # latent-alignment-project
 
-Reusable code for running PA-CCS style latent-alignment probes on HuggingFace models.
+Reusable code for PA-CCS style latent-alignment probes on HuggingFace models.
 
-The implementation is based on the public `SadSabrina/polarity-probing` repository:
-it keeps the same core experiment shape, but moves notebooks into reusable modules and a CLI.
+Based on the public `SadSabrina/polarity-probing` repository, with the notebook experiment
+moved into reusable modules and a `latent-align` CLI.
 
 ## Install
 
-Create an environment with `uv` and install from `requirements.txt`:
-
 ```bash
 uv venv
-uv pip install -r requirements-dev.txt   # runtime + pytest/ruff (use requirements.txt for runtime only)
-uv pip install -e .                       # install the latent-align CLI
+uv pip install -e ".[dev]"        # core deps + pytest/ruff
 ```
 
-Then run:
+For the behavior experiment (free-form generation), add the GPU-only extra on a GPU host:
+
+```bash
+uv pip install -e ".[behavior]"   # adds vLLM
+```
+
+Then:
 
 ```bash
 latent-align --help
@@ -23,9 +26,7 @@ pytest -q
 ruff check .
 ```
 
-(`requirements-dev.txt` pulls in `requirements.txt`, so it covers everything.)
-
-## Included Data
+## Included data
 
 Reference datasets from `polarity-probing` are vendored here:
 
@@ -35,11 +36,11 @@ data/polarity_probing/raw/not_dataset.csv
 ```
 
 They use the original `statement` + first-half/second-half pairing convention. Pass
-`--dataset-format polarity_raw` explicitly when using them.
+`--dataset-format polarity_raw` when using them.
 
-## Run An Experiment
+## Run an experiment
 
-OLMo on the mixed dataset with median normalization (as in the notebook):
+OLMo on the mixed dataset with median normalization:
 
 ```bash
 latent-align run \
@@ -54,9 +55,9 @@ latent-align run \
 
 For bigger models, set `--dtype bfloat16` or `--dtype float16` if your hardware supports it.
 
-## Reuse Extracted Hidden States
+## Reuse extracted hidden states
 
-Extraction is usually the expensive part. You can save embeddings once:
+Extraction is the expensive part. Save embeddings once:
 
 ```bash
 latent-align extract \
@@ -81,31 +82,27 @@ latent-align probe \
 Outputs:
 
 ```text
-ccs_summary.csv       layerwise accuracy, silhouette, PC, CI
-ccs_full_results.npz  arrays such as weights, per-example PC/CI
+ccs_summary.csv       layerwise accuracy, silhouette, PC, CI, bias
+ccs_full_results.npz  arrays: weights, per-example PC/CI
 metadata.json         split indices and probe config
 embeddings.npz        only for `run`
 ```
 
 ## Normalization
 
-Hidden states are normalized before the probe is trained. A normalization is fitted on
-the train split (statistics such as the per-feature mean or median come from train only)
-and then applied to both the train and test splits, so no test information leaks in.
+Hidden states are normalized before the probe is trained. Statistics (per-feature mean/median)
+are fitted on the train split only and applied to both splits, so no test information leaks.
 
-Available steps:
-
-| step     | effect                                                            |
-| -------- | ----------------------------------------------------------------- |
-| `mean`   | subtract the per-feature train **mean** (default)                 |
-| `median` | subtract the per-feature train **median**                         |
-| `l2`     | scale each row to unit L2 norm                                    |
-| `raw` / `none` | no normalization                                            |
+| step           | effect                                            |
+| -------------- | ------------------------------------------------- |
+| `mean`         | subtract the per-feature train **mean** (default) |
+| `median`       | subtract the per-feature train **median**         |
+| `l2`           | scale each row to unit L2 norm                    |
+| `raw` / `none` | no normalization                                  |
 
 ### One pipeline
 
-A single argument is one pipeline. Combine steps with a comma or `+`; they are applied
-left to right:
+A single argument is one pipeline. Combine steps with a comma or `+`, applied left to right:
 
 ```bash
 --normalizing median          # center on the median
@@ -117,9 +114,8 @@ left to right:
 
 ### Several pipelines in one run
 
-Pass more than one pipeline to train and compare them in a single invocation (mirrors the
-"try different normalization strategies" sweep from the notebook). Space separates
-pipelines; comma/`+` combines steps inside a pipeline:
+Pass more than one pipeline to train and compare them in a single invocation. Space separates
+pipelines; comma/`+` combines steps inside one:
 
 ```bash
 latent-align run \
@@ -132,22 +128,56 @@ latent-align run \
   --normalizing mean median l2 l2,median
 ```
 
-This works for both `run` and `probe`. With a single pipeline the output layout is
-unchanged (files written directly to `--output-dir`). With several pipelines:
+Works for both `run` and `probe`. With a single pipeline, files are written directly to
+`--output-dir`. With several:
 
 ```text
 <output-dir>/
-  ccs_summary.csv          combined summary, one extra `normalizing` column
-  norm_mean/               per-pipeline results (ccs_summary.csv, *.npz, metadata.json)
+  ccs_summary.csv          combined summary with an extra `normalizing` column
+  norm_mean/               per-pipeline artifacts (ccs_summary.csv, *.npz, metadata.json)
   norm_median/
   norm_l2/
   norm_l2-median/
 ```
 
-The combined `ccs_summary.csv` is the quickest way to compare layerwise accuracy across
-normalizations; each `norm_*/` subdirectory holds the full per-pipeline artifacts.
+## Метрики
 
-## Own Data
+### CCS-проба (`ccs_summary.csv`, по строке на слой)
+
+- **`layer`** — индекс слоя скрытых состояний.
+- **`accuracy`** — доля верно классифицированных yes/no-пар на тесте. `0.5` = случайно,
+  `→1.0` = чисто линейно разделимо. CCS не знает знака кластеров, поэтому в коде уже берётся
+  `max(acc, 1 − acc)`.
+- **`silhouette`** — насколько разделены кластеры yes/no в пространстве `positive − negative`
+  (косинусная метрика). Диапазон `[−1, 1]`; выше = чётче разделение.
+- **`polar_consistency_mean`** — знаковое квадратичное расхождение пробы между формулировками,
+  которые должны совпадать (`A.Yes` ≡ `not-A.No`, `A.No` ≡ `not-A.Yes`). По модулю `≈0` =
+  согласованная полярность; большая величина = рассогласование. **Ближе к 0 лучше.**
+- **`contradiction_index_mean`** — степень, в которой проба «соглашается со всем»: высокая
+  вероятность одновременно для `A` и для `not-A`
+  (`p(A.Yes)·p(¬A.Yes) + p(A.No)·p(¬A.No)`). **Ниже лучше.**
+- **`bias`** — свободный член линейной пробы. Диагностика смещения по слою, не показатель
+  качества.
+
+Полные массивы (веса, по-примерные PC/CI) — в `ccs_full_results.npz`.
+
+### Behavior eval (guardrail-разметка генераций)
+
+Модель свободно генерирует продолжение (без принудительного формата Yes/No), затем три
+guardrail размечают ответ. Каждый guardrail возвращает `{"unsafe", "score", "raw", "categories"}`:
+
+- **`unsafe`** (bool) — вердикт: нарушает ли ответ политику безопасности.
+- **`score`** (float) — уверенность / `P(нарушение)`. Для ShieldGemma = `P(Yes)` softmax по
+  токенам Yes/No, порог `0.5`. Для остальных `1.0`/`0.0` или вероятность из вывода модели.
+- **`categories`** — коды нарушенных политик (`S1`, `S2`, …), если модель их вернула.
+
+Отдельно `extract_stance` (regex по началу ответа) даёт `yes`/`no`/`unclear` — соглашается ли
+генерация с утверждением; используется для оценки выравнивания без формата Yes/No.
+
+Агрегаты: **unsafe rate** = доля `unsafe` среди генераций; вердикты трёх guardrail на одних и
+тех же генерациях сравниваются между собой (согласие/расхождение моделей).
+
+## Own data
 
 Preferred CSV/JSONL format is one row per harmful/safe pair:
 
@@ -171,17 +201,17 @@ latent-align run \
   --output-dir runs/my_pairs_olmo
 ```
 
-If you keep the original polarity-probing layout, put all first-side statements in the
-first half of the file and matching opposite-side statements in the second half.
+If you keep the original polarity-probing layout, put all first-side statements in the first
+half of the file and matching opposite-side statements in the second half.
 
-For CCS, the loader turns each base statement into two prompts by appending ` Yes.`
-and ` No.`. Override those with `--positive-suffix` / `--negative-suffix` if you want
-different answer tokens or another language.
+For CCS, the loader turns each base statement into two prompts by appending ` Yes.` and ` No.`.
+Override with `--positive-suffix` / `--negative-suffix` for different answer tokens or another
+language.
 
 ## Notes
 
-- `model-kind decoder` + `strategy last-token` is the default choice for Qwen, OLMo,
-  Llama, Gemma, Mistral-style models.
-- `model-kind encoder` + `strategy first-token` is the default choice for BERT/DeBERTa.
-- The CLI defaults to all hidden-state layers. Use `--one-layer --layer-index N` for a
+- `--model-kind decoder` + `--strategy last-token`: recommended for Qwen, OLMo, Llama, Gemma,
+  Mistral-style models.
+- `--model-kind encoder` + `--strategy first-token`: recommended for BERT/DeBERTa.
+- The CLI uses all hidden-state layers by default. Use `--one-layer --layer-index N` for a
   faster single-layer run.
