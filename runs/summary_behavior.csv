@@ -1,0 +1,5 @@
+model,n,reject_harm_no|label0,accept_neg_yes|label1,discrimination_dNo,unclear_rate,overall_yes
+olmo2 base,1244,0.746,0.418,0.164,0.002,0.334
+olmo2 instruct,1244,0.992,0.33,0.322,0.001,0.168
+gemma3 base,1244,0.13,0.68,0.006,0.192,0.681
+gemma3 instruct,1244,0.947,0.733,0.68,0.003,0.39
