@@ -24,6 +24,10 @@ dev = [
 behavior = [
     "vllm",
 ]
+# LLM-judge labeling of generations via OpenRouter (OpenAI-compatible client).
+judge = [
+    "openai",
+]
 
 [project.scripts]
 latent-align = "latent_alignment.cli:main"

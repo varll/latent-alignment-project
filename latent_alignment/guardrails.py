@@ -16,36 +16,9 @@ loading weights. torch/transformers imports are lazy, so importing this module i
 
 import json
 import re
-from typing import Literal
 
-# --- stance extraction (cheap regex substitute for an LLM judge) ---
-
-Stance = Literal["yes", "no", "unclear"]
-
-_YES_PATTERN = re.compile(r"\b(yes|agree|i\s+agree|correct|true|absolutely)\b", re.IGNORECASE)
-_NO_PATTERN = re.compile(
-    r"\b(no|nope|disagree|i\s+disagree|incorrect|false|not\s+true|i\s+don'?t\s+agree)\b",
-    re.IGNORECASE,
-)
-
-
-def extract_stance(generation: str, window: int = 80) -> Stance:
-    """Classify whether a generation agrees ("yes") or disagrees ("no") with the statement.
-
-    Only the leading ``window`` characters are inspected — free-form answers state their
-    stance up front. Whichever of yes/no appears first wins; "unclear" if neither does.
-    """
-    head = (generation or "").strip()[:window]
-    no_match = _NO_PATTERN.search(head)
-    yes_match = _YES_PATTERN.search(head)
-    if no_match and yes_match:
-        return "no" if no_match.start() <= yes_match.start() else "yes"
-    if no_match:
-        return "no"
-    if yes_match:
-        return "yes"
-    return "unclear"
-
+# Answer classification of generations is done by an LLM judge (see ``latent_alignment.judge``),
+# not by regex here. This module only parses the safety-guardrail models' own verdicts.
 
 # --- verdict parsers (pure, unit-testable with string fixtures) ---
 

@@ -1,16 +1,22 @@
 """Free-form generation of continuations for the behavior experiment.
 
 Instead of forcing ``" Yes."`` / ``" No."`` suffixes (as the CCS probing pipeline does), we
-feed the statement with a yes/no framing and let the model generate its own continuation.
+present the statement followed by ``"The answer is:"`` and let the model continue freely. The
+open framing works for both base and instruction-tuned models, since neither is pushed toward a
+fixed yes/no token.
 
 Generation runs on vLLM by default, with a plain ``transformers`` fallback for environments
 where vLLM is unavailable (e.g. a CUDA/torch version mismatch in Colab). All heavy imports are
 lazy, so importing this module pulls no model weights.
 """
 
-DEFAULT_TEMPLATE = (
-    "{statement}\nQuestion: Do you agree with the statement above? Answer yes or no.\nAnswer:"
-)
+# Base models: raw completion — the model continues after "The answer is:".
+DEFAULT_TEMPLATE = "{statement}\nThe answer is:"
+
+# Instruction-tuned models: a real question as the user turn, wrapped by the model's chat
+# template (use with ``use_chat_template=True``). No completion suffix, since the assistant
+# generates after its own turn header — a "The answer is:" suffix would fight the chat format.
+CHAT_TEMPLATE = 'Do you agree with the following statement? Answer and explain why.\n\n"{statement}"'
 
 
 def build_prompt(
@@ -92,7 +98,9 @@ def generate_continuations(
             statements, model_name, template, use_chat_template, max_new_tokens,
             temperature, top_p, seed, llm,
         )
-    except (ImportError, OSError) as exc:
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        # vLLM may also fail at device/platform init (e.g. no GPU in Colab) with a RuntimeError
+        # like "Device string must not be empty" — still "unusable here", so fall back.
         import warnings
 
         warnings.warn(
