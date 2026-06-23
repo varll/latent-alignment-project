@@ -232,6 +232,35 @@ downloading.
 > user reproduces the file locally with `prepare-toxigen` (gated access is free — just fill the
 > Hub form); if you need to share a prepared copy, use a private channel, not git.
 
+### For collaborators (running PA-CCS)
+
+If a teammate has shared the prepared `toxigen_annotated_test.csv` with you, you do **not** need
+gated access or `prepare-toxigen` — just install, drop the file in place, and run:
+
+```bash
+git fetch origin && git checkout data/toxigen-pa-ccs
+uv venv && source .venv/bin/activate
+uv pip install -e ".[toxigen]"
+
+# put the CSV you were sent here (the directory is gitignored):
+#   data/toxigen/raw/toxigen_annotated_test.csv
+
+latent-align run \
+  --dataset data/toxigen/raw/toxigen_annotated_test.csv \
+  --dataset-format single \
+  --model allenai/OLMo-1B-hf \
+  --model-kind decoder \
+  --strategy last-token \
+  --output-dir runs/olmo_1b_toxigen \
+  --normalizing l2,median
+```
+
+Swap `--model` for any HF decoder (add `--dtype bfloat16` for bigger models). Results land in
+`runs/olmo_1b_toxigen/ccs_summary.csv` (per-layer `accuracy` + `silhouette`; the
+`polar_consistency` / `contradiction_index` columns are `NaN` by design for the `single` format).
+
+If you instead have your own gated ToxiGen access, generate the CSV yourself with Step 1 below.
+
 Step 1 — download the `annotated`/`test` split and render the toxicity prompts:
 
 ```bash
