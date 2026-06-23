@@ -226,6 +226,11 @@ statement,is_harmfull_opposition
 exact same PA-CCS pipeline as the mixed dataset, via the `single` format. The dataset is gated:
 accept its terms on the Hub and `huggingface-cli login` before downloading.
 
+> **Do not commit the ToxiGen CSV to this repo.** ToxiGen is gated and this repo is public, so
+> re-hosting its raw text would violate the dataset terms. `data/toxigen/` is gitignored. Each
+> user reproduces the file locally with `prepare-toxigen` (gated access is free — just fill the
+> Hub form); if you need to share a prepared copy, use a private channel, not git.
+
 Step 1 — download the `annotated`/`test` split and render the toxicity prompts:
 
 ```bash

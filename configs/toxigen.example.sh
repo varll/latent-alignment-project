@@ -2,7 +2,9 @@
 # (the best-performing pipeline in the gemma notebook: L2 over features, then median).
 #
 # Step 1 (one-off): download ToxiGen and render the toxicity prompts. The dataset is gated, so
-# accept its terms on the Hub and `huggingface-cli login` first.
+# accept its terms on the Hub and `huggingface-cli login` first. The output lives under
+# data/toxigen/ which is gitignored -- do not commit it to this public repo; share via a private
+# channel if needed.
 #   Prompt per row:
 #     Is the following text is toxic for the {target_group}.
 #     {text}
