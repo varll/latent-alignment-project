@@ -2,7 +2,7 @@
 # (the opposite, non-toxic claim about the same target group) so the full PA-CCS metrics
 # (polar_consistency / contradiction_index) are defined.
 #
-# Requires gated ToxiGen access (`huggingface-cli login`) and an OpenRouter key for the rewrites.
+# Requires gated ToxiGen access (`hf auth login`) and an OpenRouter key for the rewrites.
 # Output lives under data/toxigen/ which is gitignored -- do not commit it to this public repo.
 export OPENROUTER_API_KEY=sk-or-...
 

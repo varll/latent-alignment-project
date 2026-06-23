@@ -224,7 +224,8 @@ statement,is_harmfull_opposition
 
 [`toxigen/toxigen-data`](https://huggingface.co/datasets/toxigen/toxigen-data) is run through the
 exact same PA-CCS pipeline as the mixed dataset, via the `single` format. The dataset is gated:
-accept its terms on the Hub and `huggingface-cli login` before downloading.
+accept its terms on the Hub and `hf auth login` (older clients: `huggingface-cli login`) before
+downloading.
 
 > **Do not commit the ToxiGen CSV to this repo.** ToxiGen is gated and this repo is public, so
 > re-hosting its raw text would violate the dataset terms. `data/toxigen/` is gitignored. Each

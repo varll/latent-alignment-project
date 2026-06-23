@@ -8,7 +8,7 @@ pairing). CCS then appends ``" Yes."`` / ``" No."`` to probe the model's latent 
 direction against the human label.
 
 The ToxiGen download is gated: accept the dataset terms on the Hub and log in
-(``huggingface-cli login``) before running the prep step. The ``datasets`` import is lazy so this
+(``hf auth login``) before running the prep step. The ``datasets`` import is lazy so this
 module imports cleanly without it installed.
 """
 
