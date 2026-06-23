@@ -7,9 +7,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from latent_alignment.ccs import ProbeConfig, summarize_results, train_ccs_layers
 from latent_alignment.data import load_dataset
-from latent_alignment.extract import extract_texts, load_embeddings, load_hf_model, save_embeddings
+
+# NOTE: latent_alignment.ccs / latent_alignment.extract pull in torch & transformers, so they are
+# imported lazily inside the commands that need them. This keeps `prepare-toxigen` (pure data prep)
+# usable without the heavy GPU stack installed.
 
 
 def main() -> None:
@@ -119,6 +121,8 @@ def main() -> None:
 
 
 def command_extract(args) -> None:
+    from latent_alignment.extract import extract_texts, load_hf_model, save_embeddings
+
     dataset = _load_cli_dataset(args)
     model, tokenizer, device = load_hf_model(
         args.model,
@@ -156,12 +160,16 @@ def command_extract(args) -> None:
 
 
 def command_probe(args) -> None:
+    from latent_alignment.extract import load_embeddings
+
     dataset = _load_cli_dataset(args)
     positive, negative = load_embeddings(args.embeddings)
     _probe_and_write(args, dataset, positive, negative)
 
 
 def command_run(args) -> None:
+    from latent_alignment.extract import load_embeddings
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     embeddings_path = output_dir / "embeddings.npz"
@@ -212,6 +220,8 @@ def command_prepare_toxigen(args) -> None:
 
 
 def _probe_and_write(args, dataset, positive: np.ndarray, negative: np.ndarray) -> None:
+    from latent_alignment.ccs import ProbeConfig, summarize_results, train_ccs_layers
+
     train_idx, test_idx = dataset.train_test_indices(
         test_size=args.test_size,
         random_state=args.random_state,
