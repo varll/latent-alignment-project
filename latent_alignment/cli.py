@@ -72,6 +72,25 @@ def main() -> None:
     run_parser.add_argument("--trust-remote-code", action="store_true")
     run_parser.add_argument("--max-length", type=int, default=512)
 
+    toxigen_parser = subparsers.add_parser(
+        "prepare-toxigen",
+        help="Download the ToxiGen annotated split and write a 'single'-format CSV",
+    )
+    toxigen_parser.add_argument(
+        "--output",
+        default="data/toxigen/raw/toxigen_annotated_test.csv",
+        help="Output CSV path",
+    )
+    toxigen_parser.add_argument("--config", default="annotated", help="ToxiGen subset name")
+    toxigen_parser.add_argument("--split", default="test", help="ToxiGen split name")
+    toxigen_parser.add_argument(
+        "--toxic-threshold",
+        type=float,
+        default=3.0,
+        help="Human toxicity score (1-5) at or above which a text is labelled toxic (1)",
+    )
+    toxigen_parser.add_argument("--cache-dir", default=None, help="HuggingFace datasets cache dir")
+
     args = parser.parse_args()
     if args.command == "extract":
         command_extract(args)
@@ -79,6 +98,8 @@ def main() -> None:
         command_probe(args)
     elif args.command == "run":
         command_run(args)
+    elif args.command == "prepare-toxigen":
+        command_prepare_toxigen(args)
 
 
 def command_extract(args) -> None:
@@ -133,6 +154,25 @@ def command_run(args) -> None:
     dataset = _load_cli_dataset(args)
     positive, negative = load_embeddings(embeddings_path)
     _probe_and_write(args, dataset, positive, negative)
+
+
+def command_prepare_toxigen(args) -> None:
+    from latent_alignment.toxigen import build_toxigen_dataframe
+
+    df = build_toxigen_dataframe(
+        config=args.config,
+        split=args.split,
+        toxic_threshold=args.toxic_threshold,
+        cache_dir=args.cache_dir,
+    )
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output, index=False)
+    toxic = int(df["is_harmfull_opposition"].sum())
+    print(
+        f"Wrote {len(df)} ToxiGen {args.config}/{args.split} rows to {output} "
+        f"({toxic} toxic / {len(df) - toxic} benign at threshold {args.toxic_threshold})."
+    )
 
 
 def _probe_and_write(args, dataset, positive: np.ndarray, negative: np.ndarray) -> None:
@@ -229,7 +269,7 @@ def _add_data_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--dataset-format",
         default="auto",
-        choices=["auto", "paired", "polarity_raw"],
+        choices=["auto", "paired", "polarity_raw", "single"],
     )
     parser.add_argument("--positive-col", default="positive_text")
     parser.add_argument("--negative-col", default="negative_text")

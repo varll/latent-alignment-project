@@ -7,7 +7,7 @@ from typing import Literal
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-DatasetFormat = Literal["auto", "paired", "polarity_raw"]
+DatasetFormat = Literal["auto", "paired", "polarity_raw", "single"]
 
 
 @dataclass(frozen=True)
@@ -86,6 +86,8 @@ def load_dataset(
         )
     if dataset_format == "polarity_raw":
         return _load_polarity_raw(df, text_col, label_col, positive_suffix, negative_suffix)
+    if dataset_format == "single":
+        return _load_single(df, text_col, label_col, positive_suffix, negative_suffix)
     raise ValueError(f"Unsupported dataset format: {dataset_format}")
 
 
@@ -187,6 +189,33 @@ def _load_polarity_raw(
         labels=labels.astype(int).reset_index(drop=True),
         pair_ids=pd.Series(list(range(midpoint)) + list(range(midpoint))),
         opposite_indices=pd.Series(list(range(midpoint, len(df))) + list(range(midpoint))),
+    )
+
+
+def _load_single(
+    df: pd.DataFrame,
+    text_col: str,
+    label_col: str,
+    positive_suffix: str,
+    negative_suffix: str,
+) -> PairedDataset:
+    """One independent statement per row, with its own label and no opposite pairing.
+
+    Each statement becomes a ``Yes.`` / ``No.`` contrast pair, exactly like the other formats,
+    so CCS accuracy and silhouette are computed per row. Unlike ``polarity_raw``/``paired`` there
+    are no opposite-polarity pairs, so ``opposite_indices`` points every row at itself and the
+    polar-consistency / contradiction-index metrics stay empty (``NaN``). Suitable for datasets
+    such as ToxiGen where each text is labelled on its own, with no matching counter-statement.
+    """
+    _require_columns(df, [text_col])
+    n = len(df)
+    labels = df[label_col] if label_col in df else pd.Series([0] * n, name=label_col)
+    return PairedDataset(
+        positive_texts=(df[text_col].astype(str) + positive_suffix).tolist(),
+        negative_texts=(df[text_col].astype(str) + negative_suffix).tolist(),
+        labels=labels.astype(int).reset_index(drop=True),
+        pair_ids=pd.Series(list(range(n))),
+        opposite_indices=pd.Series(list(range(n))),
     )
 
 

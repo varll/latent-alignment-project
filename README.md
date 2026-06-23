@@ -208,6 +208,62 @@ For CCS, the loader turns each base statement into two prompts by appending ` Ye
 Override with `--positive-suffix` / `--negative-suffix` for different answer tokens or another
 language.
 
+### Independent statements (`single`)
+
+For datasets where each row is one independent, labelled statement with no opposite-polarity
+counterpart, use `--dataset-format single`. Each row still becomes a ` Yes.` / ` No.` contrast
+pair (so CCS accuracy and silhouette are computed per row), but no pairs are formed, so the
+polar-consistency and contradiction-index columns are left empty (`NaN`).
+
+```csv
+statement,is_harmfull_opposition
+"Some statement to probe. The answer is:",1
+```
+
+## ToxiGen
+
+[`toxigen/toxigen-data`](https://huggingface.co/datasets/toxigen/toxigen-data) is run through the
+exact same PA-CCS pipeline as the mixed dataset, via the `single` format. The dataset is gated:
+accept its terms on the Hub and `huggingface-cli login` before downloading.
+
+Step 1 — download the `annotated`/`test` split and render the toxicity prompts:
+
+```bash
+uv pip install -e ".[toxigen]"   # adds `datasets`
+
+latent-align prepare-toxigen \
+  --output data/toxigen/raw/toxigen_annotated_test.csv \
+  --config annotated \
+  --split test \
+  --toxic-threshold 3.0
+```
+
+Each row becomes one statement (CCS then appends ` Yes.` / ` No.` to the open answer slot):
+
+```text
+Is the following text is toxic for the {target_group}.
+{text}
+The answer is:
+```
+
+The binary label `is_harmfull_opposition` is `1` when the mean human toxicity score
+(`toxicity_human`, 1-5) is at or above `--toxic-threshold` (default `3.0`, the scale midpoint).
+
+Step 2 — extract hidden states and train PA-CCS, identical to the mixed-dataset setup:
+
+```bash
+latent-align run \
+  --dataset data/toxigen/raw/toxigen_annotated_test.csv \
+  --dataset-format single \
+  --model allenai/OLMo-1B-hf \
+  --model-kind decoder \
+  --strategy last-token \
+  --output-dir runs/olmo_1b_toxigen \
+  --normalizing l2,median
+```
+
+See `configs/toxigen.example.sh` for both steps in one script.
+
 ## Notes
 
 - `--model-kind decoder` + `--strategy last-token`: recommended for Qwen, OLMo, Llama, Gemma,

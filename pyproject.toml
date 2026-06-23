@@ -28,6 +28,10 @@ behavior = [
 judge = [
     "openai",
 ]
+# ToxiGen data prep (`latent-align prepare-toxigen`): pulls the dataset from the Hub.
+toxigen = [
+    "datasets",
+]
 
 [project.scripts]
 latent-align = "latent_alignment.cli:main"
