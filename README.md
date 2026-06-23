@@ -269,6 +269,46 @@ latent-align run \
 
 See `configs/toxigen.example.sh` for both steps in one script.
 
+### Polarity-aware ToxiGen (`--with-negations`)
+
+The `single` format gives CCS accuracy/silhouette but leaves the polar-consistency /
+contradiction-index metrics empty, because ToxiGen has no opposite-polarity counterpart for each
+text. To recover the full PA-CCS metrics, pair each toxic text with an LLM-generated **benign
+rewrite** (the opposite, non-toxic claim about the same group) and run the `paired` format.
+
+The rewrite prompt reverses the claim while keeping the same target group and topic, mirrors the
+original structure, stays under ~25 words, and adds no new facts. Generation uses OpenRouter
+(OpenAI-compatible client, same as the judge), so set `OPENROUTER_API_KEY`:
+
+```bash
+uv pip install -e ".[toxigen]"        # datasets + openai
+export OPENROUTER_API_KEY=sk-or-...
+
+latent-align prepare-toxigen \
+  --with-negations \
+  --gen-model openai/gpt-4o-mini \
+  --output data/toxigen/raw/toxigen_annotated_test_paired.csv
+```
+
+This writes a `paired` CSV (`positive_text` = toxic prompt, `negative_text` = benign-rewrite
+prompt). Failed or unchanged rewrites are dropped. Then:
+
+```bash
+latent-align run \
+  --dataset data/toxigen/raw/toxigen_annotated_test_paired.csv \
+  --dataset-format paired \
+  --model allenai/OLMo-1B-hf \
+  --model-kind decoder \
+  --strategy last-token \
+  --output-dir runs/olmo_1b_toxigen_paired \
+  --normalizing l2,median
+```
+
+`ccs_summary.csv` now also carries meaningful `polar_consistency_mean` /
+`contradiction_index_mean`. Treat the rewrites as machine-generated: spot-check them, and ideally
+re-label with the existing judge/guardrail pipeline rather than trusting the assigned labels
+blindly. See `configs/toxigen_negation.example.sh`.
+
 ## Notes
 
 - `--model-kind decoder` + `--strategy last-token`: recommended for Qwen, OLMo, Llama, Gemma,

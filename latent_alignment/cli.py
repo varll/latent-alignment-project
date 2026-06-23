@@ -90,6 +90,22 @@ def main() -> None:
         help="Human toxicity score (1-5) at or above which a text is labelled toxic (1)",
     )
     toxigen_parser.add_argument("--cache-dir", default=None, help="HuggingFace datasets cache dir")
+    toxigen_parser.add_argument(
+        "--with-negations",
+        action="store_true",
+        help=(
+            "Pair each toxic text with an LLM-generated benign opposite and write a "
+            "'paired'-format CSV (for --dataset-format paired). Needs the 'openai' extra and "
+            "OPENROUTER_API_KEY."
+        ),
+    )
+    toxigen_parser.add_argument(
+        "--gen-model",
+        default="openai/gpt-4o-mini",
+        help="OpenRouter model used to generate benign rewrites (with --with-negations)",
+    )
+    toxigen_parser.add_argument("--gen-temperature", type=float, default=0.7)
+    toxigen_parser.add_argument("--max-workers", type=int, default=8)
 
     args = parser.parse_args()
     if args.command == "extract":
@@ -157,6 +173,28 @@ def command_run(args) -> None:
 
 
 def command_prepare_toxigen(args) -> None:
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.with_negations:
+        from latent_alignment.toxigen import build_toxigen_paired_dataframe
+
+        df = build_toxigen_paired_dataframe(
+            config=args.config,
+            split=args.split,
+            toxic_threshold=args.toxic_threshold,
+            cache_dir=args.cache_dir,
+            model=args.gen_model,
+            temperature=args.gen_temperature,
+            max_workers=args.max_workers,
+        )
+        df.to_csv(output, index=False)
+        print(
+            f"Wrote {len(df)} toxic/benign-rewrite pairs to {output} "
+            f"(paired format; generated with {args.gen_model})."
+        )
+        return
+
     from latent_alignment.toxigen import build_toxigen_dataframe
 
     df = build_toxigen_dataframe(
@@ -165,8 +203,6 @@ def command_prepare_toxigen(args) -> None:
         toxic_threshold=args.toxic_threshold,
         cache_dir=args.cache_dir,
     )
-    output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output, index=False)
     toxic = int(df["is_harmfull_opposition"].sum())
     print(

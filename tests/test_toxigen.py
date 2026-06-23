@@ -1,8 +1,11 @@
 import pandas as pd
 
 from latent_alignment.toxigen import (
+    assemble_paired_dataset,
     binarize_toxicity,
+    build_negation_messages,
     build_prompt,
+    parse_negation,
     toxigen_frame_to_dataset,
 )
 
@@ -61,3 +64,48 @@ def test_toxigen_frame_to_dataset_falls_back_to_generation_and_group() -> None:
         "Is the following text is toxic for the latino.\ng1\nThe answer is:"
     ]
     assert out["is_harmfull_opposition"].tolist() == [1]
+
+
+def test_build_negation_messages_includes_group_text_and_constraints() -> None:
+    messages = build_negation_messages("muslim", "  some toxic text  ")
+    assert messages[0]["role"] == "system"
+    assert "UNDER 25 words" in messages[0]["content"]
+    assert "NO new facts" in messages[0]["content"]
+    assert messages[1]["role"] == "user"
+    assert "TARGET GROUP: muslim" in messages[1]["content"]
+    assert "some toxic text" in messages[1]["content"]
+
+
+def test_parse_negation_prefers_json_then_falls_back() -> None:
+    assert parse_negation('{"rewrite": "Muslims deserve to live."}') == "Muslims deserve to live."
+    # Extra prose around the JSON is tolerated.
+    assert parse_negation('Sure!\n{"rewrite": "X are fine."}\n') == "X are fine."
+    # No JSON -> first non-empty line, quotes stripped.
+    assert parse_negation('"just a quoted line"') == "just a quoted line"
+    assert parse_negation("") == ""
+
+
+def test_assemble_paired_dataset_builds_pairs_and_drops_degenerate() -> None:
+    groups = ["asian", "women", "muslim"]
+    toxic = ["asians are X", "women cannot Y", "muslims Z"]
+    rewrites = [
+        "Asians are not X.",  # good pair
+        "",  # generation failed -> dropped
+        "muslims z",  # unchanged (case-insensitive) -> dropped
+    ]
+
+    out = assemble_paired_dataset(groups, toxic, rewrites)
+
+    assert list(out.columns) == [
+        "positive_text",
+        "negative_text",
+        "is_harmfull_opposition",
+        "target_group",
+        "toxic_text",
+        "benign_rewrite",
+    ]
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert row["positive_text"] == build_prompt("asian", "asians are X")
+    assert row["negative_text"] == build_prompt("asian", "Asians are not X.")
+    assert row["is_harmfull_opposition"] == 1
