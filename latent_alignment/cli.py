@@ -7,9 +7,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from latent_alignment.ccs import ProbeConfig, summarize_results, train_ccs_layers
 from latent_alignment.data import load_dataset
-from latent_alignment.extract import extract_texts, load_embeddings, load_hf_model, save_embeddings
+
+# NOTE: latent_alignment.ccs / latent_alignment.extract pull in torch & transformers, so they are
+# imported lazily inside the commands that need them. This keeps `prepare-toxigen` (pure data prep)
+# usable without the heavy GPU stack installed.
 
 
 def main() -> None:
@@ -72,6 +74,41 @@ def main() -> None:
     run_parser.add_argument("--trust-remote-code", action="store_true")
     run_parser.add_argument("--max-length", type=int, default=512)
 
+    toxigen_parser = subparsers.add_parser(
+        "prepare-toxigen",
+        help="Download the ToxiGen annotated split and write a 'single'-format CSV",
+    )
+    toxigen_parser.add_argument(
+        "--output",
+        default="data/toxigen/raw/toxigen_annotated_test.csv",
+        help="Output CSV path",
+    )
+    toxigen_parser.add_argument("--config", default="annotated", help="ToxiGen subset name")
+    toxigen_parser.add_argument("--split", default="test", help="ToxiGen split name")
+    toxigen_parser.add_argument(
+        "--toxic-threshold",
+        type=float,
+        default=3.0,
+        help="Human toxicity score (1-5) at or above which a text is labelled toxic (1)",
+    )
+    toxigen_parser.add_argument("--cache-dir", default=None, help="HuggingFace datasets cache dir")
+    toxigen_parser.add_argument(
+        "--with-negations",
+        action="store_true",
+        help=(
+            "Pair each toxic text with an LLM-generated benign opposite and write a "
+            "'paired'-format CSV (for --dataset-format paired). Needs the 'openai' extra and "
+            "OPENROUTER_API_KEY."
+        ),
+    )
+    toxigen_parser.add_argument(
+        "--gen-model",
+        default="openai/gpt-4o-mini",
+        help="OpenRouter model used to generate benign rewrites (with --with-negations)",
+    )
+    toxigen_parser.add_argument("--gen-temperature", type=float, default=0.7)
+    toxigen_parser.add_argument("--max-workers", type=int, default=8)
+
     args = parser.parse_args()
     if args.command == "extract":
         command_extract(args)
@@ -79,9 +116,13 @@ def main() -> None:
         command_probe(args)
     elif args.command == "run":
         command_run(args)
+    elif args.command == "prepare-toxigen":
+        command_prepare_toxigen(args)
 
 
 def command_extract(args) -> None:
+    from latent_alignment.extract import extract_texts, load_hf_model, save_embeddings
+
     dataset = _load_cli_dataset(args)
     model, tokenizer, device = load_hf_model(
         args.model,
@@ -119,12 +160,16 @@ def command_extract(args) -> None:
 
 
 def command_probe(args) -> None:
+    from latent_alignment.extract import load_embeddings
+
     dataset = _load_cli_dataset(args)
     positive, negative = load_embeddings(args.embeddings)
     _probe_and_write(args, dataset, positive, negative)
 
 
 def command_run(args) -> None:
+    from latent_alignment.extract import load_embeddings
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     embeddings_path = output_dir / "embeddings.npz"
@@ -135,7 +180,48 @@ def command_run(args) -> None:
     _probe_and_write(args, dataset, positive, negative)
 
 
+def command_prepare_toxigen(args) -> None:
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.with_negations:
+        from latent_alignment.toxigen import build_toxigen_paired_dataframe
+
+        df = build_toxigen_paired_dataframe(
+            config=args.config,
+            split=args.split,
+            toxic_threshold=args.toxic_threshold,
+            cache_dir=args.cache_dir,
+            model=args.gen_model,
+            temperature=args.gen_temperature,
+            max_workers=args.max_workers,
+        )
+        df.to_csv(output, index=False)
+        print(
+            f"Wrote {len(df)} toxic/benign-rewrite pairs to {output} "
+            f"(paired format; generated with {args.gen_model})."
+        )
+        return
+
+    from latent_alignment.toxigen import build_toxigen_dataframe
+
+    df = build_toxigen_dataframe(
+        config=args.config,
+        split=args.split,
+        toxic_threshold=args.toxic_threshold,
+        cache_dir=args.cache_dir,
+    )
+    df.to_csv(output, index=False)
+    toxic = int(df["is_harmfull_opposition"].sum())
+    print(
+        f"Wrote {len(df)} ToxiGen {args.config}/{args.split} rows to {output} "
+        f"({toxic} toxic / {len(df) - toxic} benign at threshold {args.toxic_threshold})."
+    )
+
+
 def _probe_and_write(args, dataset, positive: np.ndarray, negative: np.ndarray) -> None:
+    from latent_alignment.ccs import ProbeConfig, summarize_results, train_ccs_layers
+
     train_idx, test_idx = dataset.train_test_indices(
         test_size=args.test_size,
         random_state=args.random_state,
@@ -229,7 +315,7 @@ def _add_data_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--dataset-format",
         default="auto",
-        choices=["auto", "paired", "polarity_raw"],
+        choices=["auto", "paired", "polarity_raw", "single"],
     )
     parser.add_argument("--positive-col", default="positive_text")
     parser.add_argument("--negative-col", default="negative_text")

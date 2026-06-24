@@ -28,6 +28,12 @@ behavior = [
 judge = [
     "openai",
 ]
+# ToxiGen data prep (`latent-align prepare-toxigen`): pulls the dataset from the Hub.
+# `openai` is only needed for `--with-negations` (LLM benign-rewrite generation via OpenRouter).
+toxigen = [
+    "datasets",
+    "openai",
+]
 
 [project.scripts]
 latent-align = "latent_alignment.cli:main"

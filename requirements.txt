@@ -10,3 +10,5 @@ transformers
 vllm
 # LLM-judge labeling via OpenRouter; also available via the `judge` extra.
 openai
+# ToxiGen data prep (`latent-align prepare-toxigen`); also available via the `toxigen` extra.
+datasets

@@ -38,3 +38,21 @@ def test_load_polarity_raw_dataset(tmp_path: Path) -> None:
     assert dataset.negative_texts == ["harm a No.", "harm b No.", "safe a No.", "safe b No."]
     assert dataset.labels.tolist() == [0, 1, 0, 1]
     assert dataset.opposite_indices.tolist() == [2, 3, 0, 1]
+
+
+def test_load_single_dataset(tmp_path: Path) -> None:
+    path = tmp_path / "single.csv"
+    pd.DataFrame(
+        {
+            "statement": ["toxic one", "benign two", "toxic three"],
+            "is_harmfull_opposition": [1, 0, 1],
+        }
+    ).to_csv(path, index=False)
+
+    dataset = load_dataset(path, dataset_format="single")
+
+    assert dataset.positive_texts == ["toxic one Yes.", "benign two Yes.", "toxic three Yes."]
+    assert dataset.negative_texts == ["toxic one No.", "benign two No.", "toxic three No."]
+    assert dataset.labels.tolist() == [1, 0, 1]
+    # No opposite pairing: every row points at itself, so PA metrics stay empty.
+    assert dataset.opposite_indices.tolist() == [0, 1, 2]
