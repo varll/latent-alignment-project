@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Local tooling caches (created when running the analysis notebook)
+.mplcache/
+.ipython/
+.jupyter/
+
+# OS / editor
+.DS_Store
+.ipynb_checkpoints/
+
+# Gated ToxiGen data: never commit to this public repo (license/ToS).
+# Reproduce locally with `latent-align prepare-toxigen`
+data/toxigen/
