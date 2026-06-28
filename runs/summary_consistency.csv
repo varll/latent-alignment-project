@@ -1,0 +1,5 @@
+model,family,variant,params,n_layers,best_acc,best_layer,best_layer_frac,mean_acc,max_silhouette,mean_contradiction_idx,polar_consistency_absmean,n,safe_rate,harmful_rate,gibberish_rate,tie_rate,coherent_rate,harmful_rate_coherent,harmful_l0_stmt,harmful_l1_neg,latent_minus_behavior
+OLMo-1B base,olmo,base,1B,17,0.69,8,0.5,0.618,0.43,0.488,0.119,1244,0.008,0.0,0.99,0.002,0.008,0.0,0.0,0.0,0.69
+OLMo-2-1B base,olmo2,base,1B,17,0.668,15,0.938,0.596,0.386,0.458,0.136,1244,0.42,0.076,0.481,0.024,0.495,0.153,0.098,0.053,0.515
+OLMo-2-1B instruct,olmo2,instruct,1B,17,0.888,16,1.0,0.633,0.318,0.516,0.106,1244,0.936,0.035,0.009,0.02,0.971,0.036,0.003,0.068,0.852
+Qwen3-4B instruct,qwen3,instruct,4B,37,0.957,21,0.583,0.792,0.319,0.502,0.052,1244,0.995,0.002,0.002,0.001,0.998,0.002,0.0,0.005,0.955

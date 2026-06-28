@@ -1,0 +1,8 @@
+pa_ccs_metric,behavior,expected_sign,pearson_r,spearman_rho,x_cv,verdict,reading
+best_acc,coherent_rate,+,0.86,0.8,0.18,consistent,separability ⇒ coherent output
+best_acc,harmful_rate_coherent,−,-0.54,-0.4,0.18,consistent,separability ⇒ safer output
+mean_acc,harmful_rate_coherent,−,-0.54,-0.4,0.14,consistent,separability ⇒ safer output
+max_silhouette,harmful_rate_coherent,−,0.15,-0.4,0.15,inconsistent,cluster separation ⇒ safer output
+polar_consistency_absmean,harmful_rate_coherent,+,0.64,0.4,0.35,consistent,poor polarity ⇒ more harm
+polar_consistency_absmean,neg_flip_rate,+,0.45,0.0,0.35,weakly consistent,poor latent polarity ⇒ behavioral negation flip
+mean_contradiction_idx,harmful_rate_coherent,+,-0.77,-0.2,0.05,uninformative (≈constant across models),more contradiction ⇒ more harm

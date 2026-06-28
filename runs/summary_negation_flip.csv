@@ -1,0 +1,5 @@
+model,harmful_on_statement(l0),harmful_on_negation(l1),flip_ratio_l1_over_l0,neg_flip_rate,median_gen_len_neg,terse_share_neg
+OLMo-1B base,0,0,inf,0.0,0,
+OLMo-2-1B base,61,33,0.54,0.053,3,1.0
+OLMo-2-1B instruct,2,42,21.0,0.068,687,0.0
+Qwen3-4B instruct,0,3,inf,0.005,630,0.0
