@@ -17,3 +17,19 @@ env/
 # Gated ToxiGen data: never commit to this public repo (license/ToS).
 # Reproduce locally with `latent-align prepare-toxigen`
 data/toxigen/
+
+# Run logs
+*.log
+
+# Build artifacts
+*.egg-info/
+
+# Large, regenerable activation caches (also derived from gated ToxiGen text)
+runs/**/toxigen_kfold_embeddings.npz
+
+# Per-rewrite noise CSV embeds raw gated ToxiGen text (toxic_text/benign_rewrite) — regenerable
+runs/toxigen_rewrite_noise.csv
+
+# Mixed-dataset group-labelling outputs: regenerable run outputs (current run was rate-limited)
+runs/mixed_dataset_group_labeled*.csv
+runs/other_label_analysis.csv

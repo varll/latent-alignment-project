@@ -12,3 +12,6 @@ vllm
 openai
 # ToxiGen data prep (`latent-align prepare-toxigen`); also available via the `toxigen` extra.
 datasets
+# Analysis & reporting (runs/analysis.py + notebooks/analysis_pa_ccs_vs_judges.ipynb).
+matplotlib
+scipy
