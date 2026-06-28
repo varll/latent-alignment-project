@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import copy
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, silhouette_score
+from sklearn.model_selection import KFold
 from sklearn.preprocessing import normalize as l2_normalize
 from torch import nn, optim
 from torch.nn import functional as F
@@ -357,6 +359,265 @@ def summarize_results(results: dict[int, dict[str, object]]) -> list[dict[str, o
             }
         )
     return rows
+
+
+def kfold_indices(
+    n_examples: int,
+    *,
+    n_splits: int = 5,
+    opposite_indices: Sequence[int] | np.ndarray | None = None,
+    random_state: int = 71,
+    shuffle: bool = True,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Pair-aware K-fold split over *examples*.
+
+    Paired layouts (an example and its ``opposite_indices`` partner) must never be split
+    across the train/test boundary, otherwise a probe could be trained on one polarity of a
+    pair and tested on the other — a subtle leak. We therefore fold on **unique pair ids**
+    (``min(i, opposite[i])``) and expand each fold back to the example level, so both halves
+    of a pair always land in the same fold. With ``opposite_indices=None`` every example is
+    its own group, i.e. an ordinary shuffled K-fold.
+
+    Returns a list of ``(train_idx, test_idx)`` integer arrays, one per fold. The test sides
+    together partition ``range(n_examples)`` (every example is held out in exactly one fold).
+    """
+    if n_splits < 2:
+        raise ValueError("n_splits must be >= 2")
+
+    if opposite_indices is None:
+        group_ids = np.arange(n_examples)
+    else:
+        opp = np.asarray(opposite_indices, dtype=int)
+        if len(opp) != n_examples:
+            raise ValueError("opposite_indices must have length n_examples")
+        group_ids = np.minimum(np.arange(n_examples), opp)
+
+    unique_groups = np.unique(group_ids)
+    n_groups = len(unique_groups)
+    if n_splits > n_groups:
+        raise ValueError(f"n_splits={n_splits} > number of unique pairs ({n_groups})")
+
+    kf = KFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state if shuffle else None)
+    folds: list[tuple[np.ndarray, np.ndarray]] = []
+    for _, test_group_pos in kf.split(unique_groups):
+        test_mask = np.isin(group_ids, unique_groups[test_group_pos])
+        folds.append((np.flatnonzero(~test_mask), np.flatnonzero(test_mask)))
+    return folds
+
+
+def _unique_pairs(opposite_indices: np.ndarray | None) -> tuple[np.ndarray, np.ndarray]:
+    """Unique polarity pairs as ``(a_idx, not_a_idx)`` using the ``a > opposite[a]`` convention.
+
+    Mirrors :func:`train_ccs_layers`. Self-paired rows (``opposite[i] == i``, e.g. the single
+    format) contribute no pairs, so the polar-consistency metrics stay empty for those datasets.
+    """
+    if opposite_indices is None:
+        return np.array([], dtype=int), np.array([], dtype=int)
+    pairs = [
+        (i, int(opposite_indices[i]))
+        for i in range(len(opposite_indices))
+        if i > opposite_indices[i]
+    ]
+    if not pairs:
+        return np.array([], dtype=int), np.array([], dtype=int)
+    return (
+        np.asarray([p[0] for p in pairs], dtype=int),
+        np.asarray([p[1] for p in pairs], dtype=int),
+    )
+
+
+def train_ccs_layers_kfold(
+    positive: np.ndarray,
+    negative: np.ndarray,
+    labels,
+    *,
+    n_splits: int = 5,
+    config: ProbeConfig | None = None,
+    opposite_indices=None,
+    layers: Sequence[int] | None = None,
+    random_state: int = 71,
+    device: str | torch.device | None = None,
+) -> dict[int, dict[str, object]]:
+    """K-fold cross-validated PA-CCS, mirroring :func:`train_ccs_layers` but never testing on
+    training data.
+
+    For every layer we run :func:`kfold_indices` (pair-grouped, so a pair is never split), train
+    a probe on the K-1 training folds and score the held-out fold. The per-example predictions and
+    confidences and the per-pair polar-consistency / contradiction-index values are collected
+    **out-of-fold** (OOF): each example/pair is scored only by the fold in which it was held out, so
+    no example is ever scored by a probe that was trained on it.
+
+    Each fold's probe has an arbitrary global polarity, so we fold orientation *per fold* using the
+    fold's own test accuracy (flip when ``acc < 0.5``, mirroring ``max(acc, 1 - acc)``); after this
+    ``1`` denotes the positive-label side consistently across folds, making the pooled OOF arrays
+    directly sliceable (e.g. per target group) downstream.
+
+    Returns ``{layer_idx: {...}}`` with per-fold lists, their mean/std aggregates, and the pooled
+    OOF arrays (``oof_predictions``, ``oof_confidence`` over examples; ``oof_polar_consistency``,
+    ``oof_contradiction_index`` over the unique pairs, aligned with ``pair_a_idx`` /
+    ``pair_not_a_idx``).
+    """
+    config = config or ProbeConfig()
+    set_seed(config.seed)
+    labels = np.asarray(labels)
+    n_examples = positive.shape[0]
+    opposite_indices = None if opposite_indices is None else np.asarray(opposite_indices, dtype=int)
+
+    folds = kfold_indices(
+        n_examples,
+        n_splits=n_splits,
+        opposite_indices=opposite_indices,
+        random_state=random_state,
+    )
+
+    pair_a_idx, pair_not_a_idx = _unique_pairs(opposite_indices)
+    pair_pos = {int(a): k for k, a in enumerate(pair_a_idx)}
+
+    layer_list = list(range(positive.shape[1])) if layers is None else list(layers)
+    results: dict[int, dict[str, object]] = {}
+
+    for layer_idx in tqdm(layer_list, desc="Training CCS (k-fold)"):
+        oof_pred = np.full(n_examples, -1, dtype=int)
+        oof_conf = np.full(n_examples, np.nan, dtype=np.float32)
+        oof_pc = np.full(len(pair_a_idx), np.nan, dtype=np.float32)
+        oof_ci = np.full(len(pair_a_idx), np.nan, dtype=np.float32)
+
+        fold_acc: list[float] = []
+        fold_sil: list[float] = []
+        fold_pc_mean: list[float] = []
+        fold_abs_pc_mean: list[float] = []
+        fold_ci_mean: list[float] = []
+        fold_bias: list[float] = []
+
+        for train_idx, test_idx in folds:
+            pos_train = positive[train_idx, layer_idx, :]
+            pos_test = positive[test_idx, layer_idx, :]
+            neg_train = negative[train_idx, layer_idx, :]
+            neg_test = negative[test_idx, layer_idx, :]
+            pos_train, pos_test, neg_train, neg_test = _normalize_split(
+                pos_train, pos_test, neg_train, neg_test, config.normalizing
+            )
+
+            ccs = CCS(
+                neg_train,
+                pos_train,
+                labels[train_idx].astype(np.float32),
+                nepochs=config.nepochs,
+                ntries=config.ntries,
+                lr=config.lr,
+                batch_size=config.batch_size,
+                weight_decay=config.weight_decay,
+                lambda_classification=config.lambda_classification,
+                device=device,
+            )
+            ccs.repeated_train()
+
+            preds, conf = ccs.predict(neg_test, pos_test)
+            y_test = labels[test_idx].astype(int)
+            acc_raw = float((preds == y_test).mean())
+            # Fold orientation so 1 == positive-label side, consistently across folds.
+            if acc_raw < 0.5:
+                preds = 1 - preds
+                conf = 1.0 - conf
+            fold_acc.append(max(acc_raw, 1.0 - acc_raw))
+            fold_sil.append(ccs.silhouette(neg_test, pos_test))
+            _, bias = ccs.weights()
+            fold_bias.append(bias)
+
+            oof_pred[test_idx] = preds
+            oof_conf[test_idx] = conf
+
+            # Pairs fully contained in this test fold (kept together by kfold_indices).
+            test_set = set(int(i) for i in test_idx)
+            fold_pairs = [
+                (int(a), int(b))
+                for a, b in zip(pair_a_idx, pair_not_a_idx, strict=True)
+                if int(a) in test_set
+            ]
+            if fold_pairs:
+                a_idx = np.asarray([p[0] for p in fold_pairs], dtype=int)
+                b_idx = np.asarray([p[1] for p in fold_pairs], dtype=int)
+                pc = np.asarray(ccs.polar_consistency(
+                    negative[a_idx, layer_idx, :], positive[a_idx, layer_idx, :],
+                    negative[b_idx, layer_idx, :], positive[b_idx, layer_idx, :],
+                )).reshape(-1)
+                ci = np.asarray(ccs.contradiction_index(
+                    negative[a_idx, layer_idx, :], positive[a_idx, layer_idx, :],
+                    negative[b_idx, layer_idx, :], positive[b_idx, layer_idx, :],
+                )).reshape(-1)
+                for a, pc_val, ci_val in zip(a_idx, pc, ci, strict=True):
+                    oof_pc[pair_pos[int(a)]] = pc_val
+                    oof_ci[pair_pos[int(a)]] = ci_val
+                fold_pc_mean.append(float(np.mean(pc)))
+                fold_abs_pc_mean.append(float(np.mean(np.abs(pc))))
+                fold_ci_mean.append(float(np.mean(ci)))
+
+        oof_scored = oof_pred >= 0
+        oof_accuracy = (
+            float((oof_pred[oof_scored] == labels[oof_scored].astype(int)).mean())
+            if oof_scored.any()
+            else float("nan")
+        )
+        results[layer_idx] = {
+            "n_folds": len(folds),
+            "fold_accuracies": fold_acc,
+            "fold_silhouettes": fold_sil,
+            "fold_polar_consistency_means": fold_pc_mean,
+            "fold_abs_polar_consistency_means": fold_abs_pc_mean,
+            "fold_contradiction_index_means": fold_ci_mean,
+            "accuracy_mean": _safe_mean(fold_acc),
+            "accuracy_std": _safe_std(fold_acc),
+            "silhouette_mean": _safe_mean(fold_sil),
+            "silhouette_std": _safe_std(fold_sil),
+            "polar_consistency_mean": _safe_mean(fold_pc_mean),
+            "polar_consistency_std": _safe_std(fold_pc_mean),
+            "abs_polar_consistency_mean": _safe_mean(fold_abs_pc_mean),
+            "abs_polar_consistency_std": _safe_std(fold_abs_pc_mean),
+            "contradiction_index_mean": _safe_mean(fold_ci_mean),
+            "contradiction_index_std": _safe_std(fold_ci_mean),
+            "bias_mean": _safe_mean(fold_bias),
+            "oof_accuracy": oof_accuracy,
+            "oof_predictions": oof_pred,
+            "oof_confidence": oof_conf,
+            "oof_polar_consistency": oof_pc,
+            "oof_contradiction_index": oof_ci,
+            "pair_a_idx": pair_a_idx,
+            "pair_not_a_idx": pair_not_a_idx,
+        }
+    return results
+
+
+def summarize_kfold_results(results: dict[int, dict[str, object]]) -> list[dict[str, object]]:
+    """Flatten :func:`train_ccs_layers_kfold` output into one row per layer (fold mean/std)."""
+    rows = []
+    for layer_idx, values in results.items():
+        rows.append(
+            {
+                "layer": layer_idx,
+                "n_folds": values.get("n_folds"),
+                "accuracy_mean": values.get("accuracy_mean"),
+                "accuracy_std": values.get("accuracy_std"),
+                "oof_accuracy": values.get("oof_accuracy"),
+                "silhouette_mean": values.get("silhouette_mean"),
+                "silhouette_std": values.get("silhouette_std"),
+                "polar_consistency_mean": values.get("polar_consistency_mean"),
+                "polar_consistency_std": values.get("polar_consistency_std"),
+                "abs_polar_consistency_mean": values.get("abs_polar_consistency_mean"),
+                "abs_polar_consistency_std": values.get("abs_polar_consistency_std"),
+                "contradiction_index_mean": values.get("contradiction_index_mean"),
+                "contradiction_index_std": values.get("contradiction_index_std"),
+                "bias_mean": values.get("bias_mean"),
+            }
+        )
+    return rows
+
+
+def _safe_mean(values: Sequence[float]) -> float:
+    return float(np.mean(values)) if len(values) else float("nan")
+
+
+def _safe_std(values: Sequence[float]) -> float:
+    return float(np.std(values)) if len(values) else float("nan")
 
 
 def _normalize_split(pos_train, pos_test, neg_train, neg_test, normalizing: str):
