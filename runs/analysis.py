@@ -1,7 +1,7 @@
 """Analysis layer for the PA-CCS (latent) vs LLM-judge (behavior) experiments.
 
 This module is the single source of truth used by ``notebooks/analysis_pa_ccs_vs_judges.ipynb``.
-It loads every run under ``runs/`` and answers the question raised in the project chat:
+It loads every run under ``runs/`` and answers the central question:
 
     "Are the internal PA-CCS metrics consistent with what the model actually generated?"
 
@@ -60,6 +60,7 @@ MODELS: list[ModelRun] = [
     ModelRun("OLMo-2-1B instruct", "olmo2", "instruct", "1B", "olmo2_1b_instruct_mixed", "behavior_olmo2_1b_it"),
     ModelRun("Gemma-3-1B base", "gemma3", "base", "1B", "gemma3_1b_base_mixed", None),
     ModelRun("Gemma-3-1B instruct", "gemma3", "instruct", "1B", "gemma3_1b_instruct_mixed", None),
+    ModelRun("Gemma-4-E2B base", "gemma4", "base", "E2B", "gemma4_e2b_mixed", None),
     ModelRun("Qwen3-4B instruct", "qwen3", "instruct", "4B", "qwen3-4b-instruct", "behavior_qwen3_4b_it"),
 ]
 
@@ -146,6 +147,253 @@ def ccs_summary() -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------------------
+# Top-layer selection (used by the layer-probe-similarity analysis)
+# --------------------------------------------------------------------------------------
+# Selection rule (documented once here so the notebook and the standalone script agree):
+#   * size-aware top-K  — top-3 layers for "small" models (< SMALL_LAYER_CUTOFF layers,
+#     i.e. the ~17-layer 1B models) and top-5 otherwise. A fixed K would over-count a
+#     17-layer model (≈30% of its depth) relative to a 37-layer model (≈14%).
+#   * threshold band    — every layer within ``margin`` corrected-accuracy of the best
+#     layer (acc_corrected >= max_acc - margin). This adapts to flat vs. peaky accuracy
+#     profiles but can return very few (peaky) or very many (flat) layers.
+# The size-aware top-K is the PRIMARY rule because it yields a fixed, comparable number
+# of layers per model for the cross-layer similarity heatmaps and the top-K-mean
+# scorecard; the threshold band is reported alongside as a robustness check.
+SMALL_LAYER_CUTOFF = 20
+TOPK_SMALL = 3
+TOPK_LARGE = 5
+ACC_MARGIN = 0.02
+
+
+def select_top_layers(
+    df: pd.DataFrame,
+    *,
+    small_cutoff: int = SMALL_LAYER_CUTOFF,
+    k_small: int = TOPK_SMALL,
+    k_large: int = TOPK_LARGE,
+    margin: float = ACC_MARGIN,
+) -> dict:
+    """Pick a model's "high-accuracy" PA-CCS layers two ways from its per-layer summary.
+
+    Returns a dict describing both selections so callers can compare them:
+    ``topk_layers`` (primary, size-aware top-K) and ``threshold_layers`` (within
+    ``margin`` of the best corrected accuracy). ``acc_corrected`` is recomputed with
+    ``max(acc, 1 - acc)`` if the column is absent (CCS is sign-ambiguous).
+    """
+    d = df.copy()
+    if "acc_corrected" not in d.columns:
+        d["acc_corrected"] = np.maximum(d["accuracy"], 1 - d["accuracy"])
+    n = int(len(d))
+    k = k_small if n < small_cutoff else k_large
+    k = min(k, n)
+    ranked = d.sort_values("acc_corrected", ascending=False)
+    topk = sorted(int(x) for x in ranked.head(k)["layer"].tolist())
+    max_acc = float(d["acc_corrected"].max())
+    thr = max_acc - margin
+    threshold = sorted(int(x) for x in d.loc[d["acc_corrected"] >= thr, "layer"].tolist())
+    return {
+        "n_layers": n,
+        "k": k,
+        "size_class": "small" if n < small_cutoff else "large",
+        "max_acc": round(max_acc, 4),
+        "margin": margin,
+        "threshold": round(thr, 4),
+        "topk_layers": topk,
+        "threshold_layers": threshold,
+    }
+
+
+# --------------------------------------------------------------------------------------
+# Random / chance baselines (null levels for every PA-CCS metric)
+# --------------------------------------------------------------------------------------
+# The PA-CCS task is binary (Yes/No, harmful vs. benign), so every performance number has a
+# chance/null level. These helpers compute that reference so the notebook can draw "chance" lines
+# and "random baseline" rows/columns, letting the reader see PA-CCS performance *above chance*.
+# Everything here is pure numpy/sklearn and seeded (``RANDOM_SEED``) for reproducibility; all
+# additions are backward-compatible (no existing function changed).
+RANDOM_SEED = 0
+
+
+def _as_labels(labels_or_n: np.ndarray | int) -> np.ndarray:
+    """Accept an array of labels, or an int ``n`` (-> a balanced binary 0/1 label vector)."""
+    if np.isscalar(labels_or_n):
+        n = int(labels_or_n)  # type: ignore[arg-type]
+        y = np.zeros(n, dtype=int)
+        y[: n // 2] = 1
+        return y
+    return np.asarray(labels_or_n)
+
+
+def random_accuracy_baseline(
+    labels_or_n: np.ndarray | int,
+    *,
+    seed: int = RANDOM_SEED,
+    n_repeats: int = 200,
+    strategies: tuple[str, ...] = ("uniform", "stratified"),
+) -> dict:
+    """Empirical chance accuracy for a binary Yes/No task via ``sklearn.dummy.DummyClassifier``.
+
+    For each strategy (``"uniform"`` = true random Yes/No, ``"stratified"`` = draw from the class
+    prior) we fit a dummy classifier on ``labels`` and score it ``n_repeats`` times, reporting both
+    the raw accuracy and the **sign-corrected** ``max(acc, 1 - acc)`` accuracy that CCS uses (CCS is
+    sign-ambiguous). Corrected chance is slightly **above** 0.5 in finite samples — report the
+    empirical value and draw ``theoretical_chance = 0.5`` as the asymptotic reference line.
+
+    Returns a flat dict with ``n``, ``theoretical_chance`` and, per strategy, ``<s>_acc`` /
+    ``<s>_acc_std`` / ``<s>_acc_corrected`` / ``<s>_acc_corrected_std``.
+    """
+    from sklearn.dummy import DummyClassifier
+
+    y = _as_labels(labels_or_n)
+    n = int(len(y))
+    rng = np.random.default_rng(seed)
+    x_dummy = np.zeros((n, 1))
+    out: dict = {"n": n, "theoretical_chance": 0.5}
+    for strat in strategies:
+        accs, corr = [], []
+        for _ in range(n_repeats):
+            rs = int(rng.integers(0, 2**31 - 1))
+            clf = DummyClassifier(strategy=strat, random_state=rs).fit(x_dummy, y)
+            pred = clf.predict(x_dummy)
+            acc = float(np.mean(pred == y))
+            accs.append(acc)
+            corr.append(max(acc, 1.0 - acc))
+        out[f"{strat}_acc"] = float(np.mean(accs))
+        out[f"{strat}_acc_std"] = float(np.std(accs))
+        out[f"{strat}_acc_corrected"] = float(np.mean(corr))
+        out[f"{strat}_acc_corrected_std"] = float(np.std(corr))
+    return out
+
+
+def majority_class_accuracy(labels: np.ndarray) -> float:
+    """Accuracy of always predicting the most frequent class (the majority-class baseline)."""
+    y = np.asarray(labels)
+    if len(y) == 0:
+        return float("nan")
+    _, counts = np.unique(y, return_counts=True)
+    return float(counts.max() / len(y))
+
+
+def _polar_consistency_np(p_a_neg, p_a_pos, p_not_a_neg, p_not_a_pos):
+    """Pure-numpy mirror of ``CCS.polar_consistency`` (per-pair signed PC)."""
+    return (
+        0.5
+        * ((p_a_pos - p_not_a_neg) ** 2 + (p_a_neg - p_not_a_pos) ** 2)
+        * np.sign(p_a_pos - p_not_a_pos)
+        * np.sign(p_not_a_neg - p_a_neg)
+    )
+
+
+def _contradiction_index_np(p_a_neg, p_a_pos, p_not_a_neg, p_not_a_pos):
+    """Pure-numpy mirror of ``CCS.contradiction_index`` (per-pair CI)."""
+    return p_a_pos * p_not_a_pos + p_a_neg * p_not_a_neg
+
+
+def random_probe_polarity_baseline(
+    n_pairs: int = 622, *, seed: int = RANDOM_SEED, n_repeats: int = 200
+) -> dict:
+    """Null level of |PC| / CI under a RANDOM probe (probe outputs ~ Uniform(0, 1)).
+
+    Simulates the four contrast-pair probe outputs ``p(A.No), p(A.Yes), p(¬A.No), p(¬A.Yes)`` as
+    independent ``Uniform(0, 1)`` draws over ``n_pairs`` pairs and applies the exact PA-CCS formulas
+    (mirrored from ``latent_alignment/ccs.py``). This is what the polarity metrics look like with no
+    signal: analytically ``E[CI] = 0.5`` and ``E[|PC|] = 1/6 ≈ 0.167``, so an observed ``CI ≈ 0.5``
+    is essentially chance.
+
+    Returns ``pc_mean`` (signed, ≈ 0), ``abs_pc_mean`` (≈ 0.167) and ``ci_mean`` (≈ 0.5) with stds.
+    """
+    rng = np.random.default_rng(seed)
+    pc_means, abs_pc_means, ci_means = [], [], []
+    for _ in range(n_repeats):
+        p = rng.random((4, int(n_pairs)))
+        pc = _polar_consistency_np(p[0], p[1], p[2], p[3])
+        ci = _contradiction_index_np(p[0], p[1], p[2], p[3])
+        pc_means.append(float(np.mean(pc)))
+        abs_pc_means.append(float(np.mean(np.abs(pc))))
+        ci_means.append(float(np.mean(ci)))
+    return {
+        "n_pairs": int(n_pairs),
+        "pc_mean": float(np.mean(pc_means)),
+        "pc_std": float(np.std(pc_means)),
+        "abs_pc_mean": float(np.mean(abs_pc_means)),
+        "abs_pc_std": float(np.std(abs_pc_means)),
+        "ci_mean": float(np.mean(ci_means)),
+        "ci_std": float(np.std(ci_means)),
+    }
+
+
+def shuffled_silhouette_baseline(
+    X: np.ndarray | None = None,
+    *,
+    n_samples: int = 400,
+    dim: int = 64,
+    n_clusters: int = 2,
+    n_repeats: int = 20,
+    seed: int = RANDOM_SEED,
+    metric: str = "cosine",
+) -> dict:
+    """Silhouette under RANDOM cluster assignment (the null is ≈ 0).
+
+    Silhouette measures cluster separation; assigning points to clusters at random destroys any
+    structure, so the score collapses toward 0 regardless of the data geometry. If ``X`` (a
+    ``(n_samples, dim)`` point matrix, e.g. ``positive - negative`` activations) is given we shuffle
+    labels over it; otherwise we use a reproducible standard-normal cloud (the null is
+    geometry-agnostic). Returns ``silhouette_mean`` / ``silhouette_std`` over ``n_repeats`` shuffles
+    plus ``theoretical`` (0.0).
+    """
+    from sklearn.metrics import silhouette_score
+
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal((n_samples, dim)) if X is None else np.asarray(X)
+    n = len(X)
+    scores = []
+    for _ in range(n_repeats):
+        lab = rng.integers(0, n_clusters, size=n)
+        if len(np.unique(lab)) < 2:
+            continue
+        scores.append(float(silhouette_score(X, lab, metric=metric)))
+    return {
+        "silhouette_mean": float(np.mean(scores)) if scores else 0.0,
+        "silhouette_std": float(np.std(scores)) if scores else 0.0,
+        "theoretical": 0.0,
+        "n": int(n),
+    }
+
+
+def random_baseline_row(
+    acc_base: dict | None = None,
+    sil_base: dict | None = None,
+    pc_base: dict | None = None,
+    *,
+    model: str = "RANDOM (chance)",
+) -> dict:
+    """A ``ccs_summary``-shaped row holding the random/chance null for each PA-CCS metric.
+
+    Pass pre-computed baseline dicts (from the helpers above) or leave them ``None`` to compute
+    defaults. Columns with no chance analogue (layer indices, family) are blank/NaN so the row drops
+    cleanly into the latent tables as a reference. Uses the ``uniform`` (true random Yes/No)
+    corrected accuracy for ``best_acc`` / ``mean_acc``.
+    """
+    acc_base = acc_base if acc_base is not None else random_accuracy_baseline(1244)
+    sil_base = sil_base if sil_base is not None else shuffled_silhouette_baseline()
+    pc_base = pc_base if pc_base is not None else random_probe_polarity_baseline()
+    return {
+        "model": model,
+        "family": "—",
+        "variant": "—",
+        "params": "—",
+        "n_layers": np.nan,
+        "best_acc": round(acc_base["uniform_acc_corrected"], 3),
+        "best_layer": np.nan,
+        "best_layer_frac": np.nan,
+        "mean_acc": round(acc_base["uniform_acc_corrected"], 3),
+        "max_silhouette": round(sil_base["silhouette_mean"], 3),
+        "mean_contradiction_idx": round(pc_base["ci_mean"], 3),
+        "polar_consistency_absmean": round(pc_base["abs_pc_mean"], 3),
+    }
+
+
+# --------------------------------------------------------------------------------------
 # Judge reliability
 # --------------------------------------------------------------------------------------
 def _harmful_rate(s: pd.Series) -> float:
@@ -155,7 +403,7 @@ def _harmful_rate(s: pd.Series) -> float:
 def judge_reliability() -> pd.DataFrame:
     """How much the three judges (and the single legacy judge) agree per model.
 
-    Surfaces the issue raised in the chat: judges disagree a lot on "harmful", and the
+    Surfaces the issue that judges disagree a lot on "harmful", and the
     legacy single ``judge_label`` column is unreliable (e.g. all-``gibberish`` for Qwen).
     """
     rows = []
