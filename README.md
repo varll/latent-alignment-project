@@ -22,13 +22,14 @@ Legend: ✅ done · ❌ missing · ⚠️ partial (see note).
 | Gemma-3-1B instruct | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Gemma-4-E2B base | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
 | Qwen3-4B instruct | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Qwen3-8B base | ⚠️¹ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Qwen3-8B base | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
 
 Column → evidence on disk:
 
 - **Mixed PA-CCS** — `runs/<ccs_dir>/ccs_summary*.csv` (+ `metadata.json`): `olmo_1b_mixed`,
   `olmo2_1b_base_mixed`, `olmo2_1b_instruct_mixed`, `gemma3_1b_base_mixed`,
-  `gemma3_1b_instruct_mixed`, `gemma4_e2b_mixed`, `qwen3-4b-instruct/ccs_summary (1).csv`.
+  `gemma3_1b_instruct_mixed`, `gemma4_e2b_mixed`, `qwen3-4b-instruct/ccs_summary (1).csv`,
+  `qwen3_8b_base_mixed`.
 - **Behavior + 3-judge** — `runs/behavior_*/judge_3model_results_*.csv`: `behavior_olmo_1b`,
   `behavior_olmo2_1b_base`, `behavior_olmo2_1b_it`, `behavior_qwen3_4b_it`.
 - **ToxiGen single** (`--dataset-format single`) — `olmo2_1b_base_toxigen`,
@@ -42,18 +43,13 @@ Column → evidence on disk:
 - **Per-group judged gen** — per-group ToxiGen generations re-labelled by the judges:
   `runs/behavior_qwen3_4b_it/toxigen_paired_judge.csv` (+ `toxigen_paired_generations.csv`).
 
-¹ Qwen3-8B base has **no** mixed PA-CCS run dir yet (`runs/qwen3_8b_base_mixed/` is absent), but
-the runner `runs/run_qwen8b_base.py` is in place to produce it; only the ToxiGen K-fold has been
-run for this model so far.
-
 ### Still needed for full experiments
 
 - **Gemma behavior + judges missing** — none of the three Gemma models
   (`gemma3_1b_base`, `gemma3_1b_instruct`, `gemma4_e2b`) have a `behavior_*/` dir with
   3-judge labels; only latent PA-CCS exists for them.
-- **Qwen3-8B base is latent-incomplete** — no mixed PA-CCS, no ToxiGen single/paired, and no
-  behavior/judge runs; it currently has only the ToxiGen per-group K-fold. The mixed run can be
-  produced with `runs/run_qwen8b_base.py`.
+- **Qwen3-8B base has no behavior** — mixed PA-CCS ✅ (best acc 0.968) and ToxiGen per-group
+  K-fold ✅, but no behavior/judge runs and no ToxiGen single/paired yet.
 - **ToxiGen per-group K-fold only for 2 models** — present for Qwen3-4B instruct and Qwen3-8B
   base; missing for all OLMo and Gemma models.
 - **Per-group judged generations only for Qwen3-4B instruct** — no other model has

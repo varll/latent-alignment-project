@@ -62,6 +62,7 @@ MODELS: list[ModelRun] = [
     ModelRun("Gemma-3-1B instruct", "gemma3", "instruct", "1B", "gemma3_1b_instruct_mixed", None),
     ModelRun("Gemma-4-E2B base", "gemma4", "base", "E2B", "gemma4_e2b_mixed", None),
     ModelRun("Qwen3-4B instruct", "qwen3", "instruct", "4B", "qwen3-4b-instruct", "behavior_qwen3_4b_it"),
+    ModelRun("Qwen3-8B base", "qwen3", "base", "8B", "qwen3_8b_base_mixed", None),
 ]
 
 
