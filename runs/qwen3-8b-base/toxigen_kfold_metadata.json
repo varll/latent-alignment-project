@@ -1,0 +1,20 @@
+{
+  "model": "Qwen/Qwen3-8B-Base",
+  "paired_csv": "data/toxigen/raw/toxigen_annotated_test_paired.csv",
+  "n_folds": 5,
+  "random_state": 71,
+  "best_layer": 20,
+  "n_layers": 37,
+  "n_examples": 804,
+  "n_pairs": 402,
+  "probe_config": {
+    "nepochs": 1000,
+    "ntries": 5,
+    "lr": 0.015,
+    "batch_size": -1,
+    "weight_decay": 0.01,
+    "lambda_classification": 0.0,
+    "normalizing": "l2,median",
+    "seed": 0
+  }
+}
