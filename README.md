@@ -18,9 +18,8 @@ Legend: ✅ done · ❌ missing · ⚠️ partial (see note).
 | OLMo-1B base | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | OLMo-2-1B base | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | OLMo-2-1B instruct | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Gemma-3-1B base | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Gemma-3-1B instruct | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Gemma-4-E2B base | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Gemma-3-1B base | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Gemma-3-1B instruct | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Qwen3-4B instruct | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Qwen3-8B base | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ |
 
@@ -28,15 +27,15 @@ Column → evidence on disk:
 
 - **Mixed PA-CCS** — `runs/<ccs_dir>/ccs_summary*.csv` (+ `metadata.json`): `olmo_1b_mixed`,
   `olmo2_1b_base_mixed`, `olmo2_1b_instruct_mixed`, `gemma3_1b_base_mixed`,
-  `gemma3_1b_instruct_mixed`, `gemma4_e2b_mixed`, `qwen3-4b-instruct/ccs_summary (1).csv`,
+  `gemma3_1b_instruct_mixed`, `qwen3-4b-instruct/ccs_summary (1).csv`,
   `qwen3_8b_base_mixed`.
 - **Behavior + 3-judge** — `runs/behavior_*/judge_3model_results_*.csv`: `behavior_olmo_1b`,
-  `behavior_olmo2_1b_base`, `behavior_olmo2_1b_it`, `behavior_qwen3_4b_it`.
+  `behavior_olmo2_1b_base`, `behavior_olmo2_1b_it`, `behavior_gemma3_1b_base`,
+  `behavior_gemma3_1b_instruct`, `behavior_qwen3_4b_it`.
 - **ToxiGen single** (`--dataset-format single`) — `olmo2_1b_base_toxigen`,
   `olmo2_1b_it_toxigen`, `qwen_toxigen_single` (each with `ccs_summary*.csv`).
 - **ToxiGen paired** (`--with-negations` → `paired`) — `olmo2_1b_base_toxigen_paired`,
-  `olmo2_1b_it_toxigen_paired`, `gemma4_e2b_toxigen_paired`,
-  `qwen3-4b-instruct/ccs_summary_toxigen_pair.csv`.
+  `olmo2_1b_it_toxigen_paired`, `qwen3-4b-instruct/ccs_summary_toxigen_pair.csv`.
 - **ToxiGen per-group K-fold** — `runs/<model>/toxigen_group_kfold.csv` +
   `toxigen_group_kfold_by_layer.csv` (from `runs/toxigen_group_kfold.py`): `qwen3-4b-instruct`,
   `qwen3-8b-base`.
@@ -45,17 +44,16 @@ Column → evidence on disk:
 
 ### Still needed for full experiments
 
-- **Gemma behavior + judges missing** — none of the three Gemma models
-  (`gemma3_1b_base`, `gemma3_1b_instruct`, `gemma4_e2b`) have a `behavior_*/` dir with
-  3-judge labels; only latent PA-CCS exists for them.
 - **Qwen3-8B base has no behavior** — mixed PA-CCS ✅ (best acc 0.968) and ToxiGen per-group
-  K-fold ✅, but no behavior/judge runs and no ToxiGen single/paired yet.
+  K-fold ✅, but no behavior/judge runs and no ToxiGen single/paired yet. It is now the only
+  latent-only registry model (Gemma-3 base/instruct now have 3-judge behavior).
 - **ToxiGen per-group K-fold only for 2 models** — present for Qwen3-4B instruct and Qwen3-8B
   base; missing for all OLMo and Gemma models.
 - **Per-group judged generations only for Qwen3-4B instruct** — no other model has
   `toxigen_paired_judge.csv`.
-- **ToxiGen single missing for several models** — OLMo-1B base and all Gemma models have no
-  `*toxigen*` single run; Gemma-3 (base/instruct) and OLMo-1B base also lack ToxiGen paired.
+- **ToxiGen single/paired missing for several models** — OLMo-1B base and both Gemma-3 models
+  have no `*toxigen*` single run, and Gemma-3 (base/instruct) and OLMo-1B base also lack
+  ToxiGen paired.
 - **OLMo-1B base ToxiGen gap** — has mixed PA-CCS and behavior, but no ToxiGen single/paired or
   K-fold runs.
 

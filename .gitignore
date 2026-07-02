@@ -33,3 +33,6 @@ runs/toxigen_rewrite_noise.csv
 # Mixed-dataset group-labelling outputs: regenerable run outputs (current run was rate-limited)
 runs/mixed_dataset_group_labeled*.csv
 runs/other_label_analysis.csv
+
+# Local-only "whole story" notebook: comprehensive narrative kept off GitHub by request
+notebooks/full_story.ipynb
