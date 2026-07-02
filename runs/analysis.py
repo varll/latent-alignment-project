@@ -58,9 +58,8 @@ MODELS: list[ModelRun] = [
     ModelRun("OLMo-1B base", "olmo", "base", "1B", "olmo_1b_mixed", "behavior_olmo_1b"),
     ModelRun("OLMo-2-1B base", "olmo2", "base", "1B", "olmo2_1b_base_mixed", "behavior_olmo2_1b_base"),
     ModelRun("OLMo-2-1B instruct", "olmo2", "instruct", "1B", "olmo2_1b_instruct_mixed", "behavior_olmo2_1b_it"),
-    ModelRun("Gemma-3-1B base", "gemma3", "base", "1B", "gemma3_1b_base_mixed", None),
-    ModelRun("Gemma-3-1B instruct", "gemma3", "instruct", "1B", "gemma3_1b_instruct_mixed", None),
-    ModelRun("Gemma-4-E2B base", "gemma4", "base", "E2B", "gemma4_e2b_mixed", None),
+    ModelRun("Gemma-3-1B base", "gemma3", "base", "1B", "gemma3_1b_base_mixed", "behavior_gemma3_1b_base"),
+    ModelRun("Gemma-3-1B instruct", "gemma3", "instruct", "1B", "gemma3_1b_instruct_mixed", "behavior_gemma3_1b_instruct"),
     ModelRun("Qwen3-4B instruct", "qwen3", "instruct", "4B", "qwen3-4b-instruct", "behavior_qwen3_4b_it"),
     ModelRun("Qwen3-8B base", "qwen3", "base", "8B", "qwen3_8b_base_mixed", None),
 ]
